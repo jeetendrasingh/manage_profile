@@ -2,15 +2,45 @@ main {
   margin: 0 auto;
   width: 1008px;
 }
-.region-header {
+.left-right-header {
   background : transparent url(../images/border-header.png) repeat-x bottom;
   height:94px;
 }
-#block-portal-branding{
-  background : transparent url(../images/comma-white.png)no-repeat;
+.region-left-header {
+  float: left;
+  width: 28%;
+  margin: 20px;
+}
+.region-right-header {
+  width: 50%;
+  float: right;
+  margin: 20px 20px 20px 30px;
+}
+#block-portal-main-menu  a {
+	color : #00a1d5;
+	text-decoration: none;
+}
+.region-top-header{
+  position: relative;
+  overflow: hidden;
+  background: #314048;
+}
+.region-top-header a,
+.region-top-header a.is-active {
+	color: #fff;
+	text-decoration: none;
+}
+#block-portal-account-menu {
   width:1083px;
   margin-left:auto;
   margin-right:auto;
+}
+#block-portal-branding{
+  /*background : transparent url(../images/comma-white.png)no-repeat;
+  width:1083px;
+  margin-left:auto;
+  margin-right:auto;*/
+  float: right;
 }
 footer{
   position: fixed;
@@ -35,7 +65,7 @@ footer{
  height: 50px;
 	
 }
-#block-homepagedummyblock, #block-homepagedummyblock-2, #block-homepagedummyblock-3, #block-homepagedummyblock-4{
+#block-homepagedummy, #block-homepagedummy-2, #block-homepagedummy-3, #block-homepagedummy-4{
 	float:left;
 	width:47%;
 	margin :10px;

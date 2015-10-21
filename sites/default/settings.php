@@ -283,7 +283,7 @@ $config_directories = array();
  *   $settings['hash_salt'] = file_get_contents('/home/example/salt.txt');
  * @endcode
  */
-$settings['hash_salt'] = 'R7D8XDsuSMJH0UhjkDSI5W7W91Z6_Eko07R-mZ79Lwg9Wr9XzBpMGTb3ayFNSE8haJB2keVuNA';
+$settings['hash_salt'] = 'QfdLSpiYCIvT6BtoOuVHBm3s6eBqKUMJ0DONm72bZmVC2_z48CTt_CVMvpYE2AW1UxTwHDmOQQ';
 
 /**
  * Deployment identifier.
@@ -683,7 +683,7 @@ $settings['container_yamls'][] = __DIR__ . '/services.yml';
 #   include __DIR__ . '/settings.local.php';
 # }
 $databases['default']['default'] = array (
-  'database' => 'manage_profile',
+  'database' => 'manageprofile',
   'username' => 'root',
   'password' => '',
   'prefix' => '',
@@ -693,4 +693,4 @@ $databases['default']['default'] = array (
   'driver' => 'mysql',
 );
 $settings['install_profile'] = 'standard';
-$config_directories['sync'] = 'sites/default/files/config_c79l2ocx_5nlWzJmZgYm3nrT7ETDQqMYTRMFmkYba6mXmpnS8OPosCxfCDxEB1ER04cIp43Gdw/sync';
+$config_directories['sync'] = 'sites/default/files/config_T42xkvo7UGNESz_Nl2lh7apjUQDb9V1CWKc25v0INBHxU6-VYpG3napHPNDkeGAcRUwazXWcnw/sync';

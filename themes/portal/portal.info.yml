@@ -5,3 +5,18 @@ core: 8.x
 base theme: classy
 libraries:
   - portal/base
+# Regions
+regions:
+  top_header: Top header
+  header: Header
+  left_header: Left header
+  right_header: right header
+  bottom_header: Bottom header
+  breadcrumb: Breadcrumb
+  highlighted: Highlighted
+  help: Help
+  featured: Featured
+  content: Content
+  sidebar_first: First sidebar
+  sidebar_second: Second sidebar
+  footer: Footer
