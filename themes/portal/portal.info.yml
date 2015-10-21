@@ -1,0 +1,7 @@
+name: Portal
+type: theme
+description: 'My sub-theme, using Classy as parent theme'
+core: 8.x
+base theme: classy
+libraries:
+  - portal/base

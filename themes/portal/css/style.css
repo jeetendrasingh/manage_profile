@@ -1,0 +1,42 @@
+main {
+  margin: 0 auto;
+  width: 1008px;
+}
+.region-header {
+  background : transparent url(../images/border-header.png) repeat-x bottom;
+  height:94px;
+}
+#block-portal-branding{
+  background : transparent url(../images/comma-white.png)no-repeat;
+  width:1083px;
+  margin-left:auto;
+  margin-right:auto;
+}
+footer{
+  position: fixed;
+  background: #0f4155;
+  width: 100%;
+  color: #fff;
+  display: block;
+  bottom: 0;
+  z-index: 1000;
+}
+.region-footer{
+	width:1083px;
+	margin-left:auto;
+	margin-right:auto;
+}
+.region-footer .tagline {
+ background: url(../images/ticker_tagline.png) no-repeat;
+ overflow: hidden;
+ text-indent: -9999px;
+ display: block;
+ /*width: 16px;*/
+ height: 50px;
+	
+}
+#block-homepagedummyblock, #block-homepagedummyblock-2, #block-homepagedummyblock-3, #block-homepagedummyblock-4{
+	float:left;
+	width:47%;
+	margin :10px;
+}
