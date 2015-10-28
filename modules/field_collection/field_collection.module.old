@@ -1,0 +1,1288 @@
+<?php
+
+////////////////////////////////////////////////////////////////////////////////
+// Stuff to either be deleted or converted.
+////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Implements hook_entity_bundle_info().
+ */
+function field_collection_entity_bundle_info() {
+  $bundles = array();
+  foreach (entity_load_multiple_by_properties('field_entity', array('type' => 'field_collection')) as $field_name => $field) {
+    $bundles['field_collection_item'][$field_name]['label'] = $field_name;
+  }
+  return $bundles;
+}
+
+/**
+ * Menu callback for loading the bundle names.
+ */
+function field_collection_field_name_load($arg) {
+  $field_name = strtr($arg, array('-' => '_'));
+  if (($field = field_info_field($field_name)) && $field['type'] == 'field_collection') {
+    return $field_name;
+  }
+}
+
+// Entity object replaced by lib/Drupal/field_collection/Entity
+// It remains here for reference and to accept merges
+// TODO: Finish conversion to new API (See TODOs in Entity dir)
+// TODO: Delete
+/**
+ * Class for field_collection_item entities.
+ */
+class FieldCollectionItemEntity extends Entity {
+
+  /**
+   * Field collection field info.
+   *
+   * @var array
+   */
+  protected $fieldInfo;
+
+  /**
+   * The host entity object.
+   *
+   * @var object
+   */
+  protected $hostEntity;
+
+  /**
+   * The host entity ID.
+   *
+   * @var integer
+   */
+  protected $hostEntityId;
+
+  /**
+   * The host entity revision ID if this is not the default revision.
+   *
+   * @var integer
+   */
+  protected $hostEntityRevisionId;
+
+  /**
+   * The host entity type.
+   *
+   * @var string
+   */
+  protected $hostEntityType;
+
+  /**
+   * The language under which the field collection item is stored.
+   *
+   * @var string
+   */
+  protected $langcode = LANGUAGE_NONE;
+
+  /**
+   * Entity ID.
+   *
+   * @var integer
+   */
+  public $item_id;
+
+  /**
+   * Field collection revision ID.
+   *
+   * @var integer
+   */
+  public $revision_id;
+
+  /**
+   * The name of the field-collection field this item is associated with.
+   *
+   * @var string
+   */
+  public $field_name;
+
+  /**
+   * Whether this revision is the default revision.
+   *
+   * @var bool
+   */
+  public $default_revision = TRUE;
+
+  /**
+   * Whether the field collection item is archived, i.e. not in use.
+   *
+   * @see FieldCollectionItemEntity::isInUse()
+   * @var bool
+   */
+  public $archived = FALSE;
+
+  /**
+   * Constructs the entity object.
+   */
+  public function __construct(array $values = array(), $entityType = NULL) {
+    parent::__construct($values, 'field_collection_item');
+    // Workaround issues http://drupal.org/node/1084268 and
+    // http://drupal.org/node/1264440:
+    // Check if the required property is set before checking for the field's
+    // type. If the property is not set, we are hitting a PDO or a core's bug.
+    // FIXME: Remove when #1264440 is fixed and the required PHP version is
+    //  properly identified and documented in the module documentation.
+    if (isset($this->field_name)) {
+      // Ok, we have the field name property, we can proceed and check the field's type
+      $field_info = $this->fieldInfo();
+      if (!$field_info || $field_info['type'] != 'field_collection') {
+        throw new Exception("Invalid field name given: {$this->field_name} is not a Field Collection field.");
+      }
+    }
+  }
+
+  /**
+   * Provides info about the field on the host entity, which embeds this
+   * field collection item.
+   */
+  public function fieldInfo() {
+    return field_info_field($this->field_name);
+  }
+
+  /**
+   * Provides info of the field instance containing the reference to this
+   * field collection item.
+   */
+  public function instanceInfo() {
+    if ($this->fetchHostDetails()) {
+      return field_info_instance($this->hostEntityType(), $this->field_name, $this->hostEntityBundle());
+    }
+  }
+
+  /**
+   * Returns the field instance label translated to interface language.
+   */
+  public function translatedInstanceLabel($langcode = NULL) {
+    if ($info = $this->instanceInfo()) {
+      if (module_exists('i18n_field')) {
+        return i18n_string("field:{$this->field_name}:{$info['bundle']}:label", $info['label'], array('langcode' => $langcode));
+      }
+      return $info['label'];
+    }
+  }
+
+  /**
+   * Specifies the default label, which is picked up by label() by default.
+   */
+  public function defaultLabel() {
+    // @todo make configurable.
+    if ($this->fetchHostDetails()) {
+      $field = $this->fieldInfo();
+      $label = $this->translatedInstanceLabel();
+
+      if ($field['cardinality'] == 1) {
+        return $label;
+      }
+      elseif ($this->item_id) {
+        return t('!instance_label @count', array('!instance_label' => $label, '@count' => $this->delta() + 1));
+      }
+      else {
+        return t('New !instance_label', array('!instance_label' => $label));
+      }
+    }
+    return t('Unconnected field collection item');
+  }
+
+  /**
+   * Returns the path used to view the entity.
+   */
+  public function path() {
+    if ($this->item_id) {
+      return field_collection_field_get_path($this->fieldInfo()) . '/' . $this->item_id;
+    }
+  }
+
+  /**
+   * Returns the URI as returned by entity_uri().
+   */
+  public function defaultUri() {
+    return array(
+      'path' => $this->path(),
+    );
+  }
+
+  /**
+   * Sets the host entity. Only possible during creation of a item.
+   *
+   * @param $create_link
+   *   (optional) Whether a field-item linking the host entity to the field
+   *   collection item should be created.
+   */
+  public function setHostEntity($entity_type, $entity, $langcode = LANGUAGE_NONE, $create_link = TRUE) {
+    if (!empty($this->is_new)) {
+      $this->hostEntityType = $entity_type;
+      $this->hostEntity = $entity;
+      $this->langcode = $langcode;
+
+      list($this->hostEntityId, $this->hostEntityRevisionId) = entity_extract_ids($this->hostEntityType, $this->hostEntity);
+      // If the host entity is not saved yet, set the id to FALSE. So
+      // fetchHostDetails() does not try to load the host entity details.
+      if (!isset($this->hostEntityId)) {
+        $this->hostEntityId = FALSE;
+      }
+      // We are create a new field collection for a non-default entity, thus
+      // set archived to TRUE.
+      if (!entity_revision_is_default($entity_type, $entity)) {
+        $this->hostEntityId = FALSE;
+        $this->archived = TRUE;
+      }
+      if ($create_link) {
+        $entity->{$this->field_name}[$this->langcode][] = array('entity' => $this);
+      }
+    }
+    else {
+      throw new Exception('The host entity may be set only during creation of a field collection item.');
+    }
+  }
+
+  /**
+   * Returns the host entity, which embeds this field collection item.
+   */
+  public function hostEntity() {
+    if ($this->fetchHostDetails()) {
+      if (!isset($this->hostEntity) && $this->isInUse()) {
+        $this->hostEntity = entity_load_single($this->hostEntityType, $this->hostEntityId);
+      }
+      elseif (!isset($this->hostEntity) && $this->hostEntityRevisionId) {
+        $this->hostEntity = entity_revision_load($this->hostEntityType, $this->hostEntityRevisionId);
+      }
+      return $this->hostEntity;
+    }
+  }
+
+  /**
+   * Returns the entity type of the host entity, which embeds this
+   * field collection item.
+   */
+  public function hostEntityType() {
+    if ($this->fetchHostDetails()) {
+      return $this->hostEntityType;
+    }
+  }
+
+  /**
+   * Returns the id of the host entity, which embeds this field collection item.
+   */
+  public function hostEntityId() {
+    if ($this->fetchHostDetails()) {
+      if (!$this->hostEntityId && $this->hostEntityRevisionId) {
+        $this->hostEntityId = entity_id($this->hostEntityType, $this->hostEntity());
+      }
+      return $this->hostEntityId;
+    }
+  }
+
+  /**
+   * Returns the bundle of the host entity, which embeds this field collection
+   * item.
+   */
+  public function hostEntityBundle() {
+    if ($entity = $this->hostEntity()) {
+      list($id, $rev_id, $bundle) = entity_extract_ids($this->hostEntityType, $entity);
+      return $bundle;
+    }
+  }
+
+  protected function fetchHostDetails() {
+    if (!isset($this->hostEntityId)) {
+      if ($this->item_id) {
+        // For saved field collections, query the field data to determine the
+        // right host entity.
+        $query = new EntityFieldQuery();
+        $query->fieldCondition($this->fieldInfo(), 'revision_id', $this->revision_id);
+        if (!$this->isInUse()) {
+          $query->age(FIELD_LOAD_REVISION);
+        }
+        $result = $query->execute();
+        list($this->hostEntityType, $data) = each($result);
+
+        if ($this->isInUse()) {
+          $this->hostEntityId = $data ? key($data) : FALSE;
+          $this->hostEntityRevisionId = FALSE;
+        }
+        // If we are querying for revisions, we get the revision ID.
+        else {
+          $this->hostEntityId = FALSE;
+          $this->hostEntityRevisionId = $data ? key($data) : FALSE;
+        }
+      }
+      else {
+        // No host entity available yet.
+        $this->hostEntityId = FALSE;
+      }
+    }
+    return !empty($this->hostEntityId) || !empty($this->hostEntity) || !empty($this->hostEntityRevisionId);
+  }
+
+  /**
+   * Determines the $delta of the reference pointing to this field collection
+   * item.
+   */
+  public function delta() {
+    if (($entity = $this->hostEntity()) && isset($entity->{$this->field_name})) {
+      foreach ($entity->{$this->field_name} as $langcode => &$data) {
+        foreach ($data as $delta => $item) {
+          if (isset($item['value']) && $item['value'] == $this->item_id) {
+            $this->langcode = $langcode;
+            return $delta;
+          }
+          elseif (isset($item['entity']) && $item['entity'] === $this) {
+            $this->langcode = $langcode;
+            return $delta;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Determines the language code under which the item is stored.
+   */
+  public function langcode() {
+    if ($this->delta() != NULL) {
+      return $this->langcode;
+    }
+  }
+
+  /**
+   * Determines whether this field collection item revision is in use.
+   *
+   * Field collection items may be contained in from non-default host entity
+   * revisions. If the field collection item does not appear in the default
+   * host entity revision, the item is actually not used by default and so
+   * marked as 'archived'.
+   * If the field collection item appears in the default revision of the host
+   * entity, the default revision of the field collection item is in use there
+   * and the collection is not marked as archived.
+   */
+  public function isInUse() {
+    return $this->default_revision && !$this->archived;
+  }
+
+  /**
+   * Deletes the field collection item and the reference in the host entity.
+   */
+  public function delete() {
+    parent::delete();
+    $this->deleteHostEntityReference();
+  }
+
+  /**
+   * Deletes the host entity's reference of the field collection item.
+   */
+  protected function deleteHostEntityReference() {
+    $delta = $this->delta();
+    if ($this->item_id && isset($delta)) {
+      unset($this->hostEntity->{$this->field_name}[$this->langcode][$delta]);
+      entity_save($this->hostEntityType, $this->hostEntity);
+    }
+  }
+
+  /**
+   * Intelligently delete a field collection item revision.
+   *
+   * If a host entity is revisioned with its field collection items, deleting
+   * a field collection item on the default revision of the host should not
+   * delete the collection item from archived revisions too. Instead, we delete
+   * the current default revision and archive the field collection.
+   *
+   * If no revisions are left or the host is not revisionable, the whole item
+   * is deleted.
+   */
+  public function deleteRevision($skip_host_update = FALSE) {
+    if (!$this->revision_id) {
+      return;
+    }
+    $info = entity_get_info($this->hostEntityType());
+    if (empty($info['entity keys']['revision']) || !$this->hostEntity()) {
+      return $this->delete();
+    }
+    if (!$skip_host_update) {
+      // Just remove the item from the host, which cares about deleting the
+      // item (depending on whether the update creates a new revision).
+      $this->deleteHostEntityReference();
+    }
+    elseif (!$this->isDefaultRevision()) {
+      entity_revision_delete('field_collection_item', $this->revision_id);
+    }
+    // If deleting the default revision, take care!
+    else {
+      $row = db_select('field_collection_item_revision', 'r')
+        ->fields('r')
+        ->condition('item_id', $this->item_id)
+        ->condition('revision_id', $this->revision_id, '<>')
+        ->execute()
+        ->fetchAssoc();
+      // If no other revision is left, delete. Else archive the item.
+      if (!$row) {
+        $this->delete();
+      }
+      else {
+        // Make the other revision the default revision and archive the item.
+        db_update('field_collection_item')
+          ->fields(array('archived' => 1, 'revision_id' => $row['revision_id']))
+          ->condition('item_id', $this->item_id)
+          ->execute();
+        entity_get_controller('field_collection_item')->resetCache(array($this->item_id));
+        entity_revision_delete('field_collection_item', $this->revision_id);
+      }
+    }
+  }
+
+  /**
+   * Export the field collection item.
+   *
+   * Since field collection entities are not directly exportable (i.e., do not
+   * have 'exportable' set to TRUE in hook_entity_info()) and since Features
+   * calls this method when exporting the field collection as a field attached
+   * to another entity, we return the export in the format expected by
+   * Features, rather than in the normal Entity::export() format.
+   */
+  public function export($prefix = '') {
+    // Based on code in EntityDefaultFeaturesController::export_render().
+    $export = "entity_import('" . $this->entityType() . "', '";
+    $export .= addcslashes(parent::export(), '\\\'');
+    $export .= "')";
+    return $export;
+  }
+
+  /**
+   * Magic method to only serialize what's necessary.
+   */
+  public function __sleep() {
+    $vars = get_object_vars($this);
+    unset($vars['entityInfo'], $vars['idKey'], $vars['nameKey'], $vars['statusKey']);
+    unset($vars['fieldInfo']);
+    // Also do not serialize the host entity, but only if it has already an id.
+    if ($this->hostEntity && ($this->hostEntityId || $this->hostEntityRevisionId)) {
+      unset($vars['hostEntity']);
+    }
+
+    // Also key the returned array with the variable names so the method may
+    // be easily overridden and customized.
+    return drupal_map_assoc(array_keys($vars));
+  }
+
+  /**
+   * Magic method to invoke setUp() on unserialization.
+   *
+   * @todo: Remove this once it appears in a released entity API module version.
+   */
+  public function __wakeup() {
+    $this->setUp();
+  }
+}
+
+/**
+ * Currently causes fatal error during the creation of a content type.
+ * TODO: Replace paths with a routing .yml
+ */
+/**
+ * Implements hook_menu().
+ */
+function field_collection_menu() {
+  $items = array();
+  if (\Drupal::moduleHandler()->moduleExists('field_ui')) {
+    $items['admin/structure/field-collections'] = array(
+      'title' => 'Field collections',
+      'description' => 'Manage fields on field collections.',
+      'route_name' => 'field_collection.overview',
+    );
+  }
+
+  // Add menu paths for viewing/editing/deleting field collection items.
+  foreach (field_info_fields() as $field) {
+    if ($field['type'] == 'field_collection') {
+      $path = field_collection_field_get_path($field);
+      $count = count(explode('/', $path));
+
+      $items[$path . '/%field_collection_item'] = array(
+        'page callback' => 'field_collection_item_page_view',
+        'page arguments' => array($count),
+        'access callback' => 'field_collection_item_access',
+        'access arguments' => array('view', $count),
+        'file' => 'field_collection.pages.inc',
+      );
+      $items[$path . '/%field_collection_item/view'] = array(
+        'title' => 'View',
+        'type' => MENU_DEFAULT_LOCAL_TASK,
+        'weight' => -10,
+      );
+      $items[$path . '/%field_collection_item/edit'] = array(
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('field_collection_item_form', $count),
+        'access callback' => 'field_collection_item_access',
+        'access arguments' => array('update', $count),
+        'title' => 'Edit',
+        'type' => MENU_LOCAL_TASK,
+        'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+        'file' => 'field_collection.pages.inc',
+      );
+      $items[$path . '/%field_collection_item/delete'] = array(
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('field_collection_item_delete_confirm', $count),
+        'access callback' => 'field_collection_item_access',
+        'access arguments' => array('delete', $count),
+        'title' => 'Delete',
+        'type' => MENU_LOCAL_TASK,
+        'context' => MENU_CONTEXT_INLINE,
+        'file' => 'field_collection.pages.inc',
+      );
+      // Add entity type and the entity id as additional arguments.
+      $items[$path . '/add/%/%'] = array(
+        'page callback' => 'field_collection_item_add',
+        'page arguments' => array($field['field_name'], $count + 1, $count + 2),
+        // The pace callback takes care of checking access itself.
+        'access callback' => TRUE,
+        'file' => 'field_collection.pages.inc',
+      );
+      // Add menu items for dealing with revisions.
+      $items[$path . '/%field_collection_item/revisions/%field_collection_item_revision'] = array(
+        'page callback' => 'field_collection_item_page_view',
+        'page arguments' => array($count + 2),
+        'access callback' => 'field_collection_item_access',
+        'access arguments' => array('view', $count + 2),
+        'file' => 'field_collection.pages.inc',
+      );
+    }
+  }
+
+  $items['field_collection/ajax'] = array(
+    'title' => 'Remove item callback',
+    'page callback' => 'field_collection_remove_js',
+    'delivery callback' => 'ajax_deliver',
+    'access callback' => TRUE,
+    'theme callback' => 'ajax_base_page_theme',
+    'type' => MENU_CALLBACK,
+    'file path' => 'includes',
+    'file' => 'form.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter() to fix the field collections admin UI tabs.
+ */
+function field_collection_menu_alter(&$items) {
+  if (module_exists('field_ui') && isset($items['admin/structure/field-collections/%field_collection_field_name/fields'])) {
+    // Make the fields task the default local task.
+    $items['admin/structure/field-collections/%field_collection_field_name'] = $items['admin/structure/field-collections/%field_collection_field_name/fields'];
+    $item = &$items['admin/structure/field-collections/%field_collection_field_name'];
+    $item['type'] = MENU_NORMAL_ITEM;
+    $item['title'] = 'Manage fields';
+    $item['title callback'] = 'field_collection_admin_page_title';
+    $item['title arguments'] = array(3);
+
+    $items['admin/structure/field-collections/%field_collection_field_name/fields'] = array(
+      'title' => 'Manage fields',
+      'type' => MENU_DEFAULT_LOCAL_TASK,
+      'weight' => 1,
+    );
+  }
+}
+
+/**
+ * Menu title callback.
+ */
+function field_collection_admin_page_title($field_name) {
+  return t('Field collection @field_name', array('@field_name' => $field_name));
+}
+
+/**
+ * Implements hook_admin_paths().
+ */
+function field_collection_admin_paths() {
+  // TODO: Figure out whether this is still needed and replace it with the
+  // new API if it is.
+  //
+  // https://drupal.org/node/2183531 for the variable
+  // Routes for the rest
+  //
+  //if (variable_get('node_admin_theme')) {
+  //  return array(
+  //    'field-collection/*/*/edit' => TRUE,
+  //    'field-collection/*/*/delete' => TRUE,
+  //    'field-collection/*/add/*/*' => TRUE,
+  //  );
+  //}
+}
+
+/**
+ * Implements hook_permission().
+ */
+function field_collection_permission() {
+  return array(
+    'administer field collections' =>  array(
+      'title' => t('Administer field collections'),
+      'description' => t('Create and delete fields on field collections.'),
+    ),
+  );
+}
+
+/**
+ * Determines whether the given user has access to a field collection.
+ *
+ * @param $op
+ *   The operation being performed. One of 'view', 'update', 'create', 'delete'.
+ * @param $item
+ *   Optionally a field collection item. If nothing is given, access for all
+ *   items is determined.
+ * @param $account
+ *   The user to check for. Leave it to NULL to check for the global user.
+ * @return boolean
+ *   Whether access is allowed or not.
+ */
+function field_collection_item_access($op, FieldCollectionItemEntity $item = NULL, $account = NULL) {
+  // We do not support editing field collection revisions that are not used at
+  // the hosts default revision as saving the host might result in a new default
+  // revision.
+  if (isset($item) && !$item->isInUse() && $op != 'view') {
+    return FALSE;
+  }
+  if (user_access('administer field collections', $account)) {
+    return TRUE;
+  }
+  if (!isset($item)) {
+    return FALSE;
+  }
+  $op = $op == 'view' ? 'view' : 'edit';
+  // Access is determined by the entity and field containing the reference.
+  $field = field_info_field($item->field_name);
+  $entity_access = entity_access($op == 'view' ? 'view' : 'update', $item->hostEntityType(), $item->hostEntity(), $account);
+  return $entity_access && field_access($op, $field, $item->hostEntityType(), $item->hostEntity(), $account);
+}
+
+/**
+ * Implements hook_theme().
+ */
+function field_collection_theme() {
+  return array(
+    'field_collection_item' => array(
+      'render element' => 'elements',
+      'template' => 'field-collection-item',
+    ),
+    'field_collection_view' => array(
+      'render element' => 'element',
+    ),
+  );
+}
+
+// hook_field_info replaced by lib/Drupal/field_collection/Plugin/Field/FieldType
+// TODO: property_type and property_callbacks
+// TODO: Delete
+/**
+ * Implements hook_field_info().
+ */
+function field_collection_field_info() {
+  return array(
+    'field_collection' => array(
+      'label' => t('Field collection'),
+      'description' => t('This field stores references to embedded entities, which itself may contain any number of fields.'),
+      'instance_settings' => array(),
+      'default_widget' => 'field_collection_hidden',
+      'default_formatter' => 'field_collection_view',
+      // As of now there is no UI for setting the path.
+      'settings' => array(
+        'path' => '',
+        'hide_blank_items' => TRUE,
+      ),
+      // Add entity property info.
+      'property_type' => 'field_collection_item',
+      'property_callbacks' => array('field_collection_entity_metadata_property_callback'),
+    ),
+  );
+}
+
+/**
+ * Returns the base path to use for field collection items.
+ */
+function field_collection_field_get_path($field) {
+  if (empty($field['settings']['path'])) {
+    return 'field-collection/' . strtr($field['field_name'], array('_' => '-'));
+  }
+  return $field['settings']['path'];
+}
+
+/**
+ * Implements hook_field_settings_form().
+ */
+function field_collection_field_settings_form($field, $instance) {
+
+  $form['hide_blank_items'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Hide blank items'),
+    '#default_value' => $field['settings']['hide_blank_items'],
+    '#description' => t("A blank item is always added to any multivalued field's form. If checked, any additional blank items are hidden except of the first item which is always shown."),
+    '#weight' => 10,
+    '#states' => array(
+      // Hide the setting if the cardinality is 1.
+      'invisible' => array(
+        ':input[name="field[cardinality]"]' => array('value' => '1'),
+      ),
+    ),
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_field_delete().
+ */
+function field_collection_field_delete($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  // Also delete all embedded entities.
+  if ($ids = field_collection_field_item_to_ids($items)) {
+    // We filter out entities that are still being referenced by other
+    // host-entities. This should never be the case, but it might happened e.g.
+    // when modules cloned a node without knowing about field-collection.
+    $entity_info = entity_get_info($entity_type);
+    $entity_id_name = $entity_info['entity keys']['id'];
+    $field_column = key($field['columns']);
+
+    foreach ($ids as $id_key => $id) {
+      $query = new EntityFieldQuery();
+      $entities = $query
+        ->fieldCondition($field['field_name'], $field_column, $id)
+        ->execute();
+      unset($entities[$entity_type][$entity->$entity_id_name]);
+
+      if (!empty($entities[$entity_type])) {
+        // Filter this $id out.
+        unset($ids[$id_key]);
+      }
+    }
+
+    entity_delete_multiple('field_collection_item', $ids);
+  }
+}
+
+/**
+ * Implements hook_field_delete_revision().
+ */
+function field_collection_field_delete_revision($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  foreach ($items as $item) {
+    if (!empty($item['revision_id'])) {
+      if ($entity = field_collection_item_revision_load($item['revision_id'])) {
+        $entity->deleteRevision(TRUE);
+      }
+    }
+  }
+}
+
+/**
+ * Get an array of field collection item IDs stored in the given field items.
+ */
+function field_collection_field_item_to_ids($items) {
+  $ids = array();
+  foreach ($items as $item) {
+    if (!empty($item['value'])) {
+      $ids[] = $item['value'];
+    }
+  }
+  return $ids;
+}
+
+/**
+ * TODO: replace with plugin API
+ * TODO: delete
+ * https://drupal.org/node/1805846
+ */
+/**
+ * Implements hook_field_formatter_info().
+ */
+function field_collection_field_formatter_info() {
+  return array(
+    'field_collection_list' => array(
+      'label' => t('Links to field collection items'),
+      'field types' => array('field_collection'),
+      'settings' =>  array(
+        'edit' => t('Edit'),
+        'delete' => t('Delete'),
+        'add' => t('Add'),
+        'description' => TRUE,
+      ),
+    ),
+    'field_collection_view' => array(
+      'label' => t('Field collection items'),
+      'field types' => array('field_collection'),
+      'settings' =>  array(
+        'edit' => t('Edit'),
+        'delete' => t('Delete'),
+        'add' => t('Add'),
+        'description' => TRUE,
+        'view_mode' => 'full',
+      ),
+    ),
+    'field_collection_fields' => array(
+      'label' => t('Fields only'),
+      'field types' => array('field_collection'),
+      'settings' =>  array(
+        'view_mode' => 'full',
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function field_collection_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  $elements = array();
+
+  if ($display['type'] != 'field_collection_fields') {
+    $elements['edit'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Edit link title'),
+      '#default_value' => $settings['edit'],
+      '#description' => t('Leave the title empty, to hide the link.'),
+    );
+    $elements['delete'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Delete link title'),
+      '#default_value' => $settings['delete'],
+      '#description' => t('Leave the title empty, to hide the link.'),
+    );
+    $elements['add'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Add link title'),
+      '#default_value' => $settings['add'],
+      '#description' => t('Leave the title empty, to hide the link.'),
+    );
+    $elements['description'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Show the field description beside the add link.'),
+      '#default_value' => $settings['description'],
+      '#description' => t('If enabled and the add link is shown, the field description is shown in front of the add link.'),
+    );
+  }
+
+  // Add a select form element for view_mode if viewing the rendered field_collection.
+  if ($display['type'] !== 'field_collection_list') {
+
+    $entity_type = entity_get_info('field_collection_item');
+    $options = array();
+    foreach ($entity_type['view modes'] as $mode => $info) {
+      $options[$mode] = $info['label'];
+    }
+
+    $elements['view_mode'] = array(
+      '#type' => 'select',
+      '#title' => t('View mode'),
+      '#options' => $options,
+      '#default_value' => $settings['view_mode'],
+      '#description' => t('Select the view mode'),
+    );
+  }
+
+  return $elements;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function field_collection_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  $output = array();
+
+  if ($display['type'] !== 'field_collection_fields') {
+    $links = array_filter(array_intersect_key($settings, array_flip(array('add', 'edit', 'delete'))));
+    if ($links) {
+      $output[] = t('Links: @links', array('@links' => check_plain(implode(', ', $links))));
+    }
+    else {
+      $output[] = t('Links: none');
+    }
+  }
+
+  if ($display['type'] !== 'field_collection_list') {
+    $entity_type = entity_get_info('field_collection_item');
+    if (!empty($entity_type['view modes'][$settings['view_mode']]['label'])) {
+      $output[] =  t('View mode: @mode', array('@mode' => $entity_type['view modes'][$settings['view_mode']]['label']));
+    }
+  }
+
+  return implode('<br>', $output);
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function field_collection_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  $settings = $display['settings'];
+
+  switch ($display['type']) {
+    case 'field_collection_list':
+
+      foreach ($items as $delta => $item) {
+        if ($field_collection = field_collection_field_get_entity($item)) {
+          $output = l($field_collection->label(), $field_collection->path());
+          $links = array();
+          foreach (array('edit', 'delete') as $op) {
+            if ($settings[$op] && field_collection_item_access($op == 'edit' ? 'update' : $op, $field_collection)) {
+              $title = entity_i18n_string("field:{$field['field_name']}:{$instance['bundle']}:setting_$op", $settings[$op]);
+              $links[] = l($title, $field_collection->path() . '/' . $op, array('query' => drupal_get_destination()));
+            }
+          }
+          if ($links) {
+            $output .= ' (' . implode('|', $links) . ')';
+          }
+          $element[$delta] = array('#markup' => $output);
+        }
+      }
+      field_collection_field_formatter_links($element, $entity_type, $entity, $field, $instance, $langcode, $items, $display);
+      break;
+
+    case 'field_collection_view':
+
+      $element['#attached']['css'][] = drupal_get_path('module', 'field_collection') . '/field_collection.theme.css';
+      $view_mode = !empty($display['settings']['view_mode']) ? $display['settings']['view_mode'] : 'full';
+      foreach ($items as $delta => $item) {
+        if ($field_collection = field_collection_field_get_entity($item)) {
+          $element[$delta]['entity'] = $field_collection->view($view_mode);
+          $element[$delta]['#theme_wrappers'] = array('field_collection_view');
+          $element[$delta]['#attributes']['class'][] = 'field-collection-view';
+          $element[$delta]['#attributes']['class'][] = 'clearfix';
+          $element[$delta]['#attributes']['class'][] = drupal_clean_css_identifier('view-mode-' . $view_mode);
+
+          $links = array(
+            '#theme' => 'links__field_collection_view',
+          );
+          $links['#attributes']['class'][] = 'field-collection-view-links';
+          foreach (array('edit', 'delete') as $op) {
+            if ($settings[$op] && field_collection_item_access($op == 'edit' ? 'update' : $op, $field_collection)) {
+              $links['#links'][$op] = array(
+                'title' => entity_i18n_string("field:{$field['field_name']}:{$instance['bundle']}:setting_$op", $settings[$op]),
+                'href' => $field_collection->path() . '/' . $op,
+                'query' => drupal_get_destination(),
+              );
+            }
+          }
+          $element[$delta]['links'] = $links;
+        }
+      }
+      field_collection_field_formatter_links($element, $entity_type, $entity, $field, $instance, $langcode, $items, $display);
+      break;
+
+    case 'field_collection_fields':
+
+      $view_mode = !empty($display['settings']['view_mode']) ? $display['settings']['view_mode'] : 'full';
+      foreach ($items as $delta => $item) {
+        if ($field_collection = field_collection_field_get_entity($item)) {
+          $element[$delta]['entity'] = $field_collection->view($view_mode);
+        }
+      }
+      break;
+  }
+
+  return $element;
+}
+
+/**
+ * Helper function to add links to a field collection field.
+ */
+function field_collection_field_formatter_links(&$element, $entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $settings = $display['settings'];
+
+  if ($settings['add'] && ($field['cardinality'] == FIELD_CARDINALITY_UNLIMITED || count($items) < $field['cardinality'])) {
+    // Check whether the current is allowed to create a new item.
+    $field_collection_item = entity_create('field_collection_item', array('field_name' => $field['field_name']));
+    $field_collection_item->setHostEntity($entity_type, $entity, LANGUAGE_NONE, FALSE);
+
+    if (field_collection_item_access('create', $field_collection_item)) {
+      $path = field_collection_field_get_path($field);
+      list($id) = entity_extract_ids($entity_type, $entity);
+      $element['#suffix'] = '';
+      if (!empty($settings['description'])) {
+        $element['#suffix'] .= '<div class="description field-collection-description">' . field_filter_xss($instance['description']) . '</div>';
+      }
+      $title = entity_i18n_string("field:{$field['field_name']}:{$instance['bundle']}:setting_add", $settings['add']);
+      $add_path = $path . '/add/' . $entity_type . '/' . $id;
+      $element['#suffix'] .= '<ul class="action-links action-links-field-collection-add"><li>';
+      $element['#suffix'] .= l($title, $add_path, array('query' => drupal_get_destination()));
+      $element['#suffix'] .= '</li></ul>';
+    }
+  }
+  // If there is no add link, add a special class to the last item.
+  if (empty($element['#suffix'])) {
+    $index = count(element_children($element)) - 1;
+    $element[$index]['#attributes']['class'][] = 'field-collection-view-final';
+  }
+
+  $element += array('#prefix' => '', '#suffix' => '');
+  $element['#prefix'] .= '<div class="field-collection-container clearfix">';
+  $element['#suffix'] .= '</div>';
+
+  return $element;
+}
+
+/**
+ * Themes field collection items printed using the field_collection_view formatter.
+ */
+function theme_field_collection_view($variables) {
+  $element = $variables['element'];
+  return '<div' . drupal_attributes($element['#attributes']) . '>' . $element['#children'] . '</div>';
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function field_collection_field_widget_info() {
+  return array(
+    'field_collection_hidden' => array(
+      'label' => t('Hidden'),
+      'field types' => array('field_collection'),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+    'field_collection_embed' => array(
+      'label' => t('Embedded'),
+      'field types' => array('field_collection'),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_attach_form().
+ *
+ * Corrects #max_delta when we hide the blank field collection item.
+ *
+ * @see field_add_more_js()
+ * @see field_collection_field_widget_form()
+ */
+function field_collection_field_attach_form($entity, &$form, &$form_state, $langcode) {
+  foreach (field_info_instances($entity_type, $form['#bundle']) as $field_name => $instance) {
+    $field = field_info_field($field_name);
+
+    if ($field['type'] == 'field_collection' && $field['settings']['hide_blank_items']
+        && field_access('edit', $field, $entity_type) && $instance['widget']['type'] == 'field_collection_embed') {
+
+      $element_langcode = $form[$field_name]['#language'];
+      if ($form[$field_name][$element_langcode]['#max_delta'] > 0) {
+        $form[$field_name][$element_langcode]['#max_delta']--;
+      }
+    }
+  }
+}
+
+/**
+ * Page callback to handle AJAX for removing a field collection item.
+ *
+ * This is a direct page callback. The actual job of deleting the item is
+ * done in the submit handler for the button, so all we really need to
+ * do is process the form and then generate output. We generate this
+ * output by doing a replace command on the id of the entire form element.
+ */
+function field_collection_remove_js() {
+  // drupal_html_id() very helpfully ensures that all html IDS are unique
+  // on a page. Unfortunately what it doesn't realize is that the IDs
+  // we are generating are going to replace IDs that already exist, so
+  // this actually works against us.
+  if (isset($_POST['ajax_html_ids'])) {
+    unset($_POST['ajax_html_ids']);
+  }
+
+  list($form, $form_state) = ajax_get_form();
+  drupal_process_form($form['#form_id'], $form, $form_state);
+
+  // Get the information on what we're removing.
+  $button = $form_state['triggering_element'];
+  // Go two levels up in the form, to the whole widget.
+  $element = drupal_array_get_nested_value($form, array_slice($button['#array_parents'], 0, -3));
+  // Now send back the proper AJAX command to replace it.
+  $return = array(
+    '#type' => 'ajax',
+    '#commands' => array(
+      ajax_command_replace('#' . $element['#id'], drupal_render($element))
+    ),
+  );
+
+  // Because we're doing this ourselves, messages aren't automatic. We have
+  // to add them.
+  $messages = theme('status_messages');
+  if ($messages) {
+    $return['#commands'][] = ajax_command_prepend('#' . $element['#id'], $messages);
+  }
+
+  return $return;
+}
+
+/**
+ * Implements hook_field_delete_field().
+ */
+function field_collection_field_delete_field($field) {
+  if ($field['type'] == 'field_collection') {
+    // Notify field.module that field collection was deleted.
+    field_attach_delete_bundle('field_collection_item', $field['field_name']);
+
+    // Clear caches.
+    entity_info_cache_clear();
+    // Do not directly issue menu rebuilds here to avoid potentially multiple
+    // rebuilds. Instead, let menu_get_item() issue the rebuild on the next
+    // request.
+    variable_set('menu_rebuild_needed', TRUE);
+  }
+}
+
+/**
+ * Implements hook_i18n_string_list_{textgroup}_alter().
+ */
+function field_collection_i18n_string_list_field_alter(&$properties, $type, $instance) {
+  if ($type == 'field_instance') {
+    $field = field_info_field($instance['field_name']);
+
+    if ($field['type'] == 'field_collection' && !empty($instance['display'])) {
+
+      foreach ($instance['display'] as $view_mode => $display) {
+        if ($display['type'] != 'field_collection_fields') {
+          $display['settings'] += array('edit' => 'edit', 'delete' => 'delete', 'add' => 'add');
+
+          $properties['field'][$instance['field_name']][$instance['bundle']]['setting_edit'] = array(
+            'title' => t('Edit link title'),
+            'string' => $display['settings']['edit'],
+          );
+          $properties['field'][$instance['field_name']][$instance['bundle']]['setting_delete'] = array(
+            'title' => t('Delete link title'),
+            'string' => $display['settings']['delete'],
+          );
+          $properties['field'][$instance['field_name']][$instance['bundle']]['setting_add'] = array(
+            'title' => t('Add link title'),
+            'string' => $display['settings']['add'],
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function field_collection_views_api() {
+  return array(
+    'api' => '3.0-alpha1',
+    'path' => drupal_get_path('module', 'field_collection') . '/views',
+  );
+}
+
+/**
+ * Implements hook_features_pipe_component_alter() for fields.
+ */
+function field_collection_features_pipe_field_alter(&$pipe, $data, $export) {
+  // Add the fields of the field collection entity to the pipe.
+  foreach ($data as $identifier) {
+    if (($field = features_field_load($identifier)) && $field['field_config']['type'] == 'field_collection') {
+      $fields = field_info_instances('field_collection_item', $field['field_config']['field_name']);
+      foreach ($fields as $name => $field) {
+        $pipe['field'][] = "{$field['entity_type']}-{$field['bundle']}-{$field['field_name']}";
+      }
+    }
+  }
+}
+
+/**
+ * Callback for generating entity metadata property info for our field instances.
+ *
+ * @see field_collection_field_info()
+ */
+function field_collection_entity_metadata_property_callback(&$info, $entity_type, $field, $instance, $field_type) {
+  $property = &$info[$entity_type]['bundles'][$instance['bundle']]['properties'][$field['field_name']];
+  // Set the bundle as we know it is the name of the field.
+  $property['bundle'] = $field['field_name'];
+  $property['getter callback'] = 'field_collection_field_property_get';
+}
+
+/**
+ * Entity property info setter callback for the host entity property.
+ *
+ * As the property is of type entity, the value will be passed as a wrapped
+ * entity.
+ */
+function field_collection_item_set_host_entity($item, $property_name, $wrapper) {
+  if (empty($item->is_new)) {
+    throw new EntityMetadataWrapperException('The host entity may be set only during creation of a field collection item.');
+  }
+  if (!isset($wrapper->{$item->field_name})) {
+    throw new EntityMetadataWrapperException('The specified entity has no such field collection field.');
+  }
+  $item->setHostEntity($wrapper->type(), $wrapper->value());
+}
+
+/**
+ * Entity property info getter callback for the host entity property.
+ */
+function field_collection_item_get_host_entity($item) {
+  // As the property is defined as 'entity', we have to return a wrapped entity.
+  return entity_metadata_wrapper($item->hostEntityType(), $item->hostEntity());
+}
+
+/**
+ * Entity property info getter callback for the field collection items.
+ *
+ * Like entity_metadata_field_property_get(), but additionally supports getting
+ * not-yet saved collection items from @code $item['entity'] @endcode.
+ */
+function field_collection_field_property_get($entity, array $options, $name, $entity_type, $info) {
+  $field = field_info_field($name);
+  $langcode = field_language($entity_type, $entity, $name, isset($options['language']) ? $options['language']->language : NULL);
+  $values = array();
+  if (isset($entity->{$name}[$langcode])) {
+    foreach ($entity->{$name}[$langcode] as $delta => $data) {
+      // Wrappers do not support multiple entity references being revisions or
+      // not yet saved entities. In the case of a single reference we can return
+      // the entity object though.
+      if ($field['cardinality'] == 1) {
+        $values[$delta] = field_collection_field_get_entity($data);
+      }
+      elseif (isset($data['value'])) {
+        $values[$delta] = $data['value'];
+      }
+    }
+  }
+  // For an empty single-valued field, we have to return NULL.
+  return $field['cardinality'] == 1 ? ($values ? reset($values) : NULL) : $values;
+}
+
+/**
+ * Implements hook_devel_generate().
+ */
+function field_collection_devel_generate($object, $field, $instance, $bundle) {
+  // Create a new field collection object and add fake data to its fields.
+  $field_collection = entity_create('field_collection_item', array('field_name' => $field['field_name']));
+  $field_collection->language = $object->language;
+  $field_collection->setHostEntity($instance['entity_type'], $object, $object->language, FALSE);
+
+  devel_generate_fields($field_collection, 'field_collection_item', $field['field_name']);
+
+  $field_collection->save(TRUE);
+
+  return array('value' => $field_collection->item_id);
+}
+
+/**
+ * Prepares variables for field collection item templates.
+ *
+ * Default template: field-collection-item.html.twig.
+ *
+ * @param array $variables
+ *   An associative array containing:
+ *   - elements: An array of elements to display in view mode.
+ */
+function template_preprocess_field_collection_item(&$variables) {
+  $field_collection_item = $variables['elements']['#field_collection_item'];
+
+  // Helpful $content variable for templates.
+  $variables += array('content' => array());
+  foreach (element_children($variables['elements']) as $key) {
+    $variables['content'][$key] = $variables['elements'][$key];
+  }
+}
