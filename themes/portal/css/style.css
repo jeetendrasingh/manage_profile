@@ -7,7 +7,7 @@ main {
   background: #fff;
 }
 .layout-container {
-	margin-bottom : 60px;
+	margin: 0 0 60px 0;
 }
 .region.region-content {
   padding: 20px;
@@ -80,8 +80,10 @@ footer{
  text-indent: -9999px;
  display: block;
  /*width: 16px;*/
- height: 50px;
-	
+ height: 50px;	
+}
+#block-tagline {
+  margin-left: 40px;
 }
 #block-homepagedummy, #block-homepagedummy-2, #block-homepagedummy-3, #block-homepagedummy-4{
 	float:left;
@@ -111,12 +113,18 @@ body.path-user h1.js-quickedit-page-title.page-title,
 /* DCX node */
 .node--type-dcx-resource-list-05-10-2015 .fieldset-legend {
   font-weight: bold;
+  margin: 10px;
 }
 .node--type-dcx-resource-list-05-10-2015 .field__label {
   font-weight: normal;
+  width:20%;
+}
+.node--type-dcx-resource-list-05-10-2015 .field__label {
+ 
 }
 .node--type-dcx-resource-list-05-10-2015 .field--label-inline {
   margin: 5px;
+  clear: both;
 }
 .node--type-dcx-resource-list-05-10-2015  .field--label-inline .field__label::after {
   margin-left: 5px;
@@ -212,3 +220,74 @@ body.path-user h1.js-quickedit-page-title.page-title{
 .menu-item a.is-active{
 	margin-left: 25px;
 }
+ul.tabs.primary{
+	background-color: #465a63;
+}
+a.is-active{
+	background-color: #324146 !important;
+}
+ul.tabs.primary li a{
+	display: block;
+	padding: 10px 20px;
+	text-align: center;
+	color: #fff;
+}
+/*.path-frontpage div#block-portal-page-title{
+	background-color: #66c6e7;
+	padding: 20px;
+}*/
+ul.tabs.primary{
+	margin-top: 25px;
+}
+.layout-content #block-portal-page-title .path-frontpage div#block-portal-page-title{
+	padding: 5px;
+}
+.path-user h1.js-quickedit-page-title.page-title{
+	color: #fff;
+	font-weight: normal;
+	font-size: 3.0em;
+}
+ul.tabs.primary a:hover{
+	background-color: #324146;
+}
+/*******create resource css by Rukayya********/
+body.user-logged-in.path-node #node-dcx-resource-list-05-10-2015-form label {
+	display: block;
+	font-weight: bold;
+}
+#node-dcx-resource-list-05-10-2015-form .js-form-item.form-item.js-form-type-entity-autocomplete.form-type-entity-autocomplete.js-form-item-field-test-0-field-account-name-0-target-id.form-item-field-test-0-field-account-name-0-target-id, #node-dcx-resource-list-05-10-2015-form div#edit-field-test-0-field-start-date-wrapper{
+	margin-bottom: 1em;
+}
+#node-dcx-resource-list-05-10-2015-form div#edit-field-resume-0-upload--description{
+	padding-top: 10px;
+}
+#node-dcx-resource-list-05-10-2015-form input#edit-field-test-add-more,#node-dcx-resource-list-05-10-2015-form input#edit-field-test-0-actions-remove-button, #node-dcx-resource-list-05-10-2015-form input#edit-submit, #node-dcx-resource-list-05-10-2015-form input#edit-preview{
+	background-color: #00a0d7;
+	color: #fff;
+	font-size: 1.125em;
+	padding: 8px 14px;
+}
+#node-dcx-resource-list-05-10-2015-form  input#edit-field-resume-0-upload{
+	background-color: #00a0d7;
+	color: #fff;
+	font-size: 1.125em;
+	padding: 8px 6px;
+}
+#node-dcx-resource-list-05-10-2015-form h4.label.js-form-required.form-required{
+	margin-right: 20em;
+}
+#node-dcx-resource-list-05-10-2015-form .js-form-item.form-item.js-form-type-entity-autocomplete.form-type-entity-autocomplete.js-form-item-field-test-0-field-account-name-0-target-id.form-item-field-test-0-field-account-name-0-target-id{
+	margin-top: 1em;
+}
+/*
+div#block-portal-page-title{
+	background-color: #66c6e7;
+}
+*/
+/*
+h1.js-quickedit-page-title.page-title{
+	padding-top: 0.5em;
+	padding-bottom: 0.5em;
+	padding-left: 0.6em;
+}
+*/
